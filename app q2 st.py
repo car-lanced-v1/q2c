@@ -177,7 +177,7 @@ def generate_robust_plot(c, A, b, signs, opt_type, title):
         ax.contourf(X, Y, mask, levels=[0.5, 1.5], colors=['mediumseagreen'], alpha=0.3)
         # Check Unboundedness: if mask touches the edges (top or right)
         if np.any(mask[-1, :]) or np.any(mask[:, -1]):
-             ax.text(x_max*0.9, y_max*0.9, "PROVAVELMENTE ILIMITADA", 
+             ax.text(x_max*0.9, y_max*0.9, "ILIMITADA", 
                      color='darkgreen', ha='right', fontweight='bold', backgroundcolor='white')
     else:
         ax.text(x_max/2, y_max/2, "REGIÃO VAZIA (INVIÁVEL)", 
@@ -249,7 +249,7 @@ def format_model_text(c, A, b, signs, type):
 # =============================================================================
 # 4. INTERFACE
 # =============================================================================
-st.title("📊 Solver PL - Método Gráfico (Robust)")
+st.title("📊 Solver PL - Método Gráfico")
 st.markdown("Ferramenta visual para PL com 2 variáveis. Suporta regiões ilimitadas e não-convexas.")
 
 exercises = {
@@ -336,3 +336,4 @@ if btn_run and texto_input:
     except Exception as e: st.error(f"Erro: {str(e)}")
 else:
     if not texto_input: st.info("👈 Selecione um exercício.")
+
