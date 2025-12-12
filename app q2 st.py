@@ -9,78 +9,59 @@ import zipfile
 from matplotlib.patches import Polygon
 
 # =============================================================================
-# CONFIGURAÇÃO DO AMBIENTE
+# CONFIGURAÇÃO
 # =============================================================================
-st.set_page_config(
-    page_title="Solver PL - Método Gráfico",
-    page_icon="📐",
-    layout="wide"
-)
+st.set_page_config(page_title="Solver PL - Gráfico", page_icon="📐", layout="wide")
 
 plt.rcParams.update({
-    'font.family': 'sans-serif',
-    'font.size': 10,
-    'axes.labelsize': 11,
-    'axes.titlesize': 12,
-    'legend.fontsize': 9,
-    'figure.dpi': 150
+    'font.family': 'sans-serif', 'font.size': 10,
+    'axes.labelsize': 11, 'axes.titlesize': 12, 'legend.fontsize': 9, 'figure.dpi': 150
 })
 
 # =============================================================================
-# 1. PARSER (VALIDAÇÃO E LEITURA)
+# 1. PARSER
 # =============================================================================
 def ler_problema_texto(texto_entrada):
-    # Normalização de quebras de linha e termos comuns
     texto_entrada = re.sub(r'(?i)(Sujeito a\s*[:]?)\s*', r'\1\n', texto_entrada)
     texto_entrada = re.sub(r'(?i)(Tal que\s*[:]?)\s*', r'\n\1\n', texto_entrada)
-    texto_entrada = re.sub(r'(?i)(Restrições\s*[:]?)\s*', r'\1\n', texto_entrada)
     
     lines = [l.strip() for l in texto_entrada.split('\n') if l.strip()]
-    if not lines: raise ValueError("A caixa de texto está vazia.")
+    if not lines: raise ValueError("Texto vazio.")
 
     tipo_opt = None
     c, A, b, sinais = [], [], [], []
-    
-    lendo_restricoes = False
     term_pattern = re.compile(r'([+-]?\s*\d*\.?\d*)\s*x(\d+)')
+    lendo_restricoes = False
     variaveis_indices = set()
 
     for line in lines:
         line_lower = line.lower()
         
-        # Validação e Leitura do Objetivo
+        # Objetivo
         if 'maximizar' in line_lower or 'minimizar' in line_lower:
             tipo_opt = 'min' if 'minimizar' in line_lower else 'max'
-            if '=' not in line:
-                raise ValueError("A função objetivo deve conter o sinal '=' (Ex: Maximizar Z = ...)")
-            
-            eq_part = line.split('=')[1].strip()
-            matches = term_pattern.findall(eq_part)
-            
-            if not matches: 
-                raise ValueError("Não foi possível identificar as variáveis na função objetivo. Use o formato '2x1 + 3x2'.")
+            if '=' not in line: raise ValueError("Objetivo deve ter '='.")
+            eq = line.split('=')[1].strip()
+            matches = term_pattern.findall(eq)
+            if not matches: raise ValueError("Variáveis não encontradas no objetivo.")
             
             temp_c = {}
-            for coeff_str, idx_str in matches:
-                idx = int(idx_str) - 1
+            for coeff, idx in matches:
+                idx = int(idx) - 1
                 variaveis_indices.add(idx)
-                coeff_str = coeff_str.replace(' ', '')
-                if coeff_str in ['', '+']: coeff = 1.0
-                elif coeff_str == '-': coeff = -1.0
-                else: coeff = float(coeff_str)
-                temp_c[idx] = coeff
-            
+                coeff = coeff.replace(' ', '')
+                if coeff in ['', '+']: val = 1.0
+                elif coeff == '-': val = -1.0
+                else: val = float(coeff)
+                temp_c[idx] = val
             n_vars = max(variaveis_indices) + 1 if variaveis_indices else 0
             c = np.zeros(n_vars)
-            for idx, val in temp_c.items(): c[idx] = val
+            for i, v in temp_c.items(): c[i] = v
             continue
 
-        if 'sujeito a' in line_lower or 'restrições' in line_lower:
-            lendo_restricoes = True; continue
-        if 'tal que' in line_lower:
-            lendo_restricoes = False; continue
+        if 'sujeito a' in line_lower: lendo_restricoes = True; continue
+        if 'tal que' in line_lower: lendo_restricoes = False; continue
 
-        # Validação e Leitura das Restrições
         if lendo_restricoes:
             sinal, sep = None, None
             if '<=' in line: sep, sinal = '<=', '<='
@@ -90,67 +71,60 @@ def ler_problema_texto(texto_entrada):
             if sep:
                 parts = line.split(sep)
                 try:
-                    # Tenta converter o lado direito para número
-                    b_str = re.split(r'\s', parts[1].strip())[0]
-                    b_val = float(b_str)
-                    
-                    b.append(b_val); sinais.append(sinal)
-                    row = np.zeros(len(c)) if len(c) > 0 else np.zeros(2)
-                    
-                    # Lê os coeficientes do lado esquerdo
+                    b_val = float(re.split(r'\s', parts[1].strip())[0])
                     matches = term_pattern.findall(parts[0])
-                    if not matches: continue # Linha vazia ou comentário
-
-                    for coeff_str, idx_str in matches:
-                        idx = int(idx_str) - 1
-                        if idx >= len(row):
-                            nova = np.zeros(idx + 1); nova[:len(row)] = row; row = nova
-                        coeff_str = coeff_str.replace(' ', '')
-                        if coeff_str in ['', '+']: k = 1.0
-                        elif coeff_str == '-': k = -1.0
-                        else: k = float(coeff_str)
+                    if not matches: continue
+                    
+                    row = np.zeros(len(c)) if len(c)>0 else np.zeros(2)
+                    for coeff, idx in matches:
+                        idx = int(idx) - 1
+                        if idx >= len(row): 
+                            new = np.zeros(idx+1); new[:len(row)] = row; row = new
+                        coeff = coeff.replace(' ', '')
+                        if coeff in ['', '+']: k = 1.0
+                        elif coeff == '-': k = -1.0
+                        else: k = float(coeff)
                         row[idx] = k
-                    A.append(row)
-                except ValueError:
-                    # Captura erro de conversão de número
-                    continue 
+                    A.append(row); b.append(b_val); sinais.append(sinal)
+                except: continue
 
-    if tipo_opt is None: raise ValueError("Não foi encontrado o comando 'Maximizar' ou 'Minimizar'.")
-    if len(A) == 0: raise ValueError("Nenhuma restrição válida foi identificada.")
-
-    # Ajuste dimensional final
-    max_len = max(len(c), max([len(row) for row in A]) if A else 0)
-    if len(c) < max_len:
-        new_c = np.zeros(max_len); new_c[:len(c)] = c; c = new_c
-    A_final = [np.pad(row, (0, max_len - len(row))) if len(row) < max_len else row for row in A]
-            
-    return np.array(c), np.array(A_final), np.array(b), sinais, tipo_opt
+    if tipo_opt is None: raise ValueError("Objetivo não encontrado.")
+    if not A: raise ValueError("Sem restrições.")
+    
+    # Ajuste dimensional
+    max_len = max(len(c), max([len(r) for r in A]) if A else 0)
+    if len(c) < max_len: 
+        new = np.zeros(max_len); new[:len(c)] = c; c = new
+    A_fin = [np.pad(r, (0, max_len-len(r))) if len(r)<max_len else r for r in A]
+    
+    return np.array(c), np.array(A_fin), np.array(b), sinais, tipo_opt
 
 # =============================================================================
-# 2. CÁLCULO GEOMÉTRICO (MANTIDO)
+# 2. CÁLCULO
 # =============================================================================
-def verificar_limitacao_region(A, sinais):
+def verificar_limitacao(A, sinais):
     normais = []
     for i, row in enumerate(A):
         if sinais[i] == '<=': normais.append(row)
         elif sinais[i] == '>=': normais.append(-row)
         else: normais.append(row); normais.append(-row)
-    normais.append([-1.0, 0.0]); normais.append([0.0, -1.0])
+    normais.append([-1,0]); normais.append([0,-1])
     
-    angulos = []
+    angs = []
     for v in normais:
         if np.linalg.norm(v) > 1e-9:
             ang = math.degrees(math.atan2(v[1], v[0])) % 360
-            angulos.append(ang)
-    if not angulos: return False 
-    angulos.sort()
-    max_gap = max([(angulos[(i+1)%len(angulos)] - angulos[i]) % 360 for i in range(len(angulos))])
-    return max_gap < (180.0 - 1e-4)
+            angs.append(ang)
+    if not angs: return False
+    angs.sort()
+    gap = max([(angs[(i+1)%len(angs)] - angs[i]) % 360 for i in range(len(angs))])
+    return gap < (180.0 - 1e-4)
 
-def resolver_sistema_grafico(c, A, b, sinais, tipo):
-    A_ext = np.vstack([A, np.eye(2)]) 
-    b_ext = np.concatenate([b, [0, 0]])
+def resolver_grafico(c, A, b, sinais, tipo):
+    A_ext = np.vstack([A, np.eye(2)])
+    b_ext = np.concatenate([b, [0,0]])
     pontos = []
+    
     for i, j in itertools.combinations(range(len(b_ext)), 2):
         m = np.array([A_ext[i], A_ext[j]])
         rhs = np.array([b_ext[i], b_ext[j]])
@@ -164,77 +138,102 @@ def resolver_sistema_grafico(c, A, b, sinais, tipo):
         viavel = True
         for k, row in enumerate(A):
             val = np.dot(row, p)
-            if sinais[k] == '<=' and val > b[k] + 1e-7: viavel = False
-            elif sinais[k] == '>=' and val < b[k] - 1e-7: viavel = False
-            elif sinais[k] == '=' and abs(val - b[k]) > 1e-7: viavel = False
+            if sinais[k]=='<=' and val > b[k]+1e-7: viavel=False
+            elif sinais[k]=='>=' and val < b[k]-1e-7: viavel=False
+            elif sinais[k]=='=' and abs(val-b[k]) > 1e-7: viavel=False
             if not viavel: break
-        if viavel and not any(np.linalg.norm(p - v) < 1e-7 for v in factiveis):
+        if viavel and not any(np.linalg.norm(p-v)<1e-7 for v in factiveis):
             factiveis.append(p)
-    
+            
     if not factiveis: return {"status": "inviavel"}
-
-    vertices = np.array(factiveis)
-    vertices = vertices[np.lexsort((vertices[:,1], vertices[:,0]))]
-    z_vals = np.dot(vertices, c)
+    
+    verts = np.array(factiveis)
+    # Ordena vértices para polígono
+    if len(verts) > 2:
+        centro = np.mean(verts, axis=0)
+        ang = np.arctan2(verts[:,1]-centro[1], verts[:,0]-centro[0])
+        verts = verts[np.argsort(ang)]
+        
+    z_vals = np.dot(verts, c)
     z_opt = np.min(z_vals) if tipo == 'min' else np.max(z_vals)
-    indices_opt = np.where(np.abs(z_vals - z_opt) < 1e-7)[0]
+    idxs = np.where(np.abs(z_vals - z_opt) < 1e-7)[0]
     
     return {
         "status": "otimo",
-        "vertices": vertices,
+        "vertices": verts,
         "z_vals": z_vals,
-        "otimos": vertices[indices_opt],
+        "otimos": verts[idxs],
         "z_opt": z_opt,
-        "eh_ilimitada": not verificar_limitacao_region(A, sinais),
-        "multiplos_otimos": len(indices_opt) > 1
+        "limitada": verificar_limitacao(A, sinais)
     }
 
 # =============================================================================
-# 3. VISUALIZAÇÃO
+# 3. FORMATADOR DE TEXTO (SUBSTITUI LATEX)
 # =============================================================================
-def gerar_texto_latex(c, A, b, sinais, tipo):
-    sinal_z = "Min" if tipo == 'min' else "Max"
-    termos = [f"{'+' if v>=0 else '-'} {abs(v):.2f}x_{{{i+1}}}" for i, v in enumerate(c) if abs(v)>1e-9]
-    z_eq = " ".join(termos).strip().lstrip("+")
-    latex = f"\\text{{{sinal_z}}} \\ Z = {z_eq} \\\\ \\text{Sujeito a:} \\\\ \\begin{{cases}} "
+def formatar_modelo_texto(c, A, b, sinais, tipo):
+    sense = "Minimizar" if tipo == 'min' else "Maximizar"
+    
+    # Função Objetivo
+    terms = []
+    for i, v in enumerate(c):
+        if abs(v) > 1e-9:
+            sign = "+" if v >= 0 else "-"
+            if i==0 and v>=0: sign = ""
+            terms.append(f"{sign} {abs(v):.2f}x{i+1}")
+    z_str = "".join(terms).strip()
+    
+    txt = f"{sense} : Z = {z_str}\nSujeito a :\n"
+    
+    # Restrições
     for i, (row, val) in enumerate(zip(A, b)):
-        lhs = " ".join([f"{'+' if k>=0 else '-'} {abs(k):.2f}x_{{{j+1}}}" for j, k in enumerate(row) if abs(k)>1e-9]).strip().lstrip("+")
-        op = "\\le" if sinais[i] == '<=' else "\\ge" if sinais[i] == '>=' else "="
-        latex += f"{lhs} {op} {val} \\\\"
-    return latex + "x_1, x_2 \\ge 0 \\end{cases}"
+        row_terms = []
+        for j, k in enumerate(row):
+            if abs(k) > 1e-9:
+                sign = "+" if k>=0 else "-"
+                if len(row_terms)==0 and k>=0: sign=""
+                row_terms.append(f"{sign} {abs(k):.2f}x{j+1}")
+        lhs = "".join(row_terms).strip()
+        if not lhs: lhs="0"
+        
+        op = "<=" if sinais[i]=='<=' else ">=" if sinais[i]=='>=' else "="
+        txt += f"  {lhs} {op} {val}\n"
+        
+    txt += "Tal que : x1, x2 >= 0"
+    return txt
 
 def gerar_grafico(res, A, b, titulo):
-    vertices, otimos = res["vertices"], res["otimos"]
-    limit = max(np.max(vertices) * 1.5, 10) if len(vertices) > 0 else 10
+    verts, otimos = res["vertices"], res["otimos"]
+    limit = max(np.max(verts)*1.5, 10) if len(verts)>0 else 10
     
-    fig, ax = plt.subplots(figsize=(8, 6))
-    if len(vertices) > 2:
-        c = np.mean(vertices, axis=0)
-        ang = np.arctan2(vertices[:,1] - c[1], vertices[:,0] - c[0])
-        ax.add_patch(Polygon(vertices[np.argsort(ang)], closed=True, alpha=0.3, color='mediumseagreen', label='Região Factível'))
+    fig, ax = plt.subplots(figsize=(8,6))
+    if len(verts) > 2 and res["limitada"]:
+        ax.add_patch(Polygon(verts, closed=True, alpha=0.3, color='mediumseagreen', label='Região Factível'))
+    elif len(verts) > 0 and not res["limitada"]:
+        # Visual simples para ilimitada
+        ax.fill_between([0, limit], [0,0], [limit, limit], color='mediumseagreen', alpha=0.1, label='Região Ilimitada')
 
-    ax.scatter(vertices[:,0], vertices[:,1], color='black', s=30, zorder=5)
-    ax.scatter(otimos[:,0], otimos[:,1], color='red', s=120, marker='*', zorder=6, label='Ótimo')
+    ax.scatter(verts[:,0], verts[:,1], c='k', s=30, zorder=5)
+    ax.scatter(otimos[:,0], otimos[:,1], c='r', s=120, marker='*', zorder=6, label='Ótimo')
     
     x = np.linspace(0, limit, 200)
-    colors = plt.cm.tab10(np.linspace(0, 1, len(A)))
+    colors = plt.cm.tab10(np.linspace(0,1,len(A)))
     for i, (row, val) in enumerate(zip(A, b)):
         if abs(row[1]) > 1e-6:
-            y = (val - row[0]*x) / row[1]
+            y = (val - row[0]*x)/row[1]
             ax.plot(x, y, label=f'R{i+1}', color=colors[i])
         else:
             ax.vlines(val/row[0], 0, limit, label=f'R{i+1}', color=colors[i])
-
+            
     ax.set_xlim(0, limit); ax.set_ylim(0, limit)
-    ax.set_xlabel('$x_1$'); ax.set_ylabel('$x_2$')
+    ax.set_xlabel('x1'); ax.set_ylabel('x2')
     ax.set_title(titulo); ax.grid(True, alpha=0.3); ax.legend()
     return fig
 
 # =============================================================================
 # 4. INTERFACE
 # =============================================================================
-st.title("📊 Solver de Programação Linear (Método Gráfico)")
-st.markdown("Ferramenta para resolução visual de problemas de PL com duas variáveis.")
+st.title("📊 Solver PL - Método Gráfico")
+st.markdown("Resolução de problemas de PL com 2 variáveis (Questões 17-24).")
 
 exercicios = {
     "Personalizado": "",
@@ -249,99 +248,76 @@ exercicios = {
 }
 
 with st.sidebar:
-    st.header("Entrada de Dados")
-    sel_ex = st.selectbox("📚 Carregar Exercício:", list(exercicios.keys()))
+    st.header("Entrada")
+    sel_ex = st.selectbox("📚 Exercício:", list(exercicios.keys()))
+    val_ini = exercicios[sel_ex] if sel_ex != "Personalizado" else "Maximizar : Z = 3x1 + 5x2\nSujeito a :\nx1 <= 4\n2x2 <= 12\nTal que : x1, x2 >= 0"
+    texto_input = st.text_area("Modelo:", value=val_ini, height=300)
+    btn_run = st.button("🚀 Resolver", type="primary")
     
-    # Campo editável (mantém o que foi digitado se 'Personalizado', senão carrega exemplo)
-    texto_input = st.text_area("Modelo Matemático:", value=exercicios[sel_ex] if sel_ex != "Personalizado" else """Maximizar : Z = 3x1 + 5x2\nSujeito a :\nx1 <= 4\n2x2 <= 12\nTal que : x1, x2 >= 0""", height=300)
-    
-    btn_resolver = st.button("🚀 Resolver", type="primary")
-    
-    # --- GUIA DE ORIENTAÇÃO (Validado) ---
-    st.markdown("---")
-    st.markdown("### 📝 Guia de Sintaxe")
-    st.info("""
-    **Formato Aceito:**
-    1. **Objetivo:** Comece com `Maximizar` ou `Minimizar` seguido de `Z = ...`
-    2. **Restrições:** Use `Sujeito a :` ou `Restrições :`
-    3. **Variáveis:** Use `x1` e `x2`.
-    4. **Operadores:** `<=`, `>=` ou `=`.
-    5. **Decimais:** Use ponto (ex: `1.5`).
-    """)
-    with st.expander("Ver Exemplo Completo"):
-        st.code("""Maximizar : Z = 3x1 + 5x2
-Sujeito a :
-x1 + x2 <= 10
-2x1 - x2 >= 5
-x1 = 4
-Tal que : x1, x2 >= 0""")
+    st.info("**Sintaxe:**\nMaximizar : Z = ...\nSujeito a :\n... <= ...\nTal que : x1, x2 >= 0")
 
-if btn_resolver and texto_input:
+if btn_run and texto_input:
     try:
-        # Validação Dimensional e de Sintaxe
         c, A, b, sinais, tipo = ler_problema_texto(texto_input)
-        
         if len(c) != 2: 
-            st.error("❌ O método gráfico requer exatamente **2 variáveis** ($x_1$ e $x_2$).")
-            st.warning("Se o seu problema tem mais variáveis, utilize o Solver Simplex ou Branch & Bound.")
+            st.error("❌ O método gráfico requer 2 variáveis.")
         else:
-            res = resolver_sistema_grafico(c, A, b, sinais, tipo)
+            res = resolver_grafico(c, A, b, sinais, tipo)
             
-            if res["status"] == "inviavel": 
-                st.warning("⚠️ **Problema Inviável:** Não existe região factível que atenda a todas as restrições.")
+            if res["status"] == "inviavel":
+                st.warning("⚠️ Problema Inviável.")
             else:
                 col1, col2 = st.columns([1, 1.5])
-                with col1:
-                    st.subheader("1. Resultados Numéricos")
-                    st.latex(gerar_texto_latex(c, A, b, sinais, tipo))
-                    st.dataframe([{"x1": f"{v[0]:.2f}", "x2": f"{v[1]:.2f}", "Z": f"{z:.2f}"} for v, z in zip(res['vertices'], res['z_vals'])], use_container_width=True)
-                    st.success(f"**Valor Ótimo (Z*) = {res['z_opt']:.4f}**")
                 
+                # --- RESULTADOS EM TEXTO PURO ---
+                with col1:
+                    st.subheader("1. Modelo Interpretado")
+                    # Exibe o modelo formatado como código (texto puro)
+                    modelo_fmt = formatar_modelo_texto(c, A, b, sinais, tipo)
+                    st.code(modelo_fmt, language="text")
+                    
+                    st.subheader("2. Resultados")
+                    st.metric("Valor Ótimo (Z*)", f"{res['z_opt']:.4f}")
+                    
+                    # Tabela Simples
+                    df_v = [{"x1": f"{v[0]:.2f}", "x2": f"{v[1]:.2f}", "Z": f"{z:.2f}"} for v, z in zip(res['vertices'], res['z_vals'])]
+                    st.dataframe(df_v, use_container_width=True)
+
+                # --- GRÁFICO ---
                 with col2:
-                    st.subheader("2. Solução Gráfica")
-                    # Título do gráfico dinâmico
-                    titulo_grafico = sel_ex if sel_ex != "Personalizado" else "Modelo Personalizado"
-                    fig = gerar_grafico(res, A, b, titulo_grafico)
+                    st.subheader("3. Gráfico")
+                    fig = gerar_grafico(res, A, b, sel_ex)
                     st.pyplot(fig)
                 
-                # --- DOWNLOAD INTELIGENTE ---
+                # --- DOWNLOAD ---
                 st.markdown("---")
+                nome_base = "Modelo_Personalizado"
+                if sel_ex != "Personalizado":
+                    m = re.search(r'Ex (\d+)', sel_ex)
+                    if m: nome_base = f"Questao_{m.group(1)}"
                 
-                if sel_ex == "Personalizado":
-                    nome_base = "Modelo_Personalizado"
-                else:
-                    match = re.search(r'Ex (\d+)', sel_ex)
-                    nome_base = f"Questao_{match.group(1)}" if match else "Exercicio_Lista"
-                
-                zip_filename = f"{nome_base}.zip"
-                txt_filename = f"Relatorio_{nome_base}.txt"
-                img_filename = f"Grafico_{nome_base}.png"
-
-                relatorio_txt = f"RELATÓRIO DE SOLUÇÃO - {nome_base}\n{'='*50}\n\n"
-                relatorio_txt += "1. MODELO MATEMÁTICO:\n" + texto_input + "\n\n"
-                relatorio_txt += "2. VÉRTICES DA REGIÃO FACTÍVEL:\n"
+                zip_name = f"{nome_base}.zip"
+                txt_content = f"RELATORIO DE SOLUCAO - {nome_base}\n{'='*40}\n\n"
+                txt_content += "1. MODELO MATEMATICO:\n" + modelo_fmt + "\n\n"
+                txt_content += "2. VERTICES:\n"
                 for v, z in zip(res['vertices'], res['z_vals']):
                     mark = " (*)" if np.abs(z - res['z_opt']) < 1e-7 else ""
-                    relatorio_txt += f"x = ({v[0]:.4f}, {v[1]:.4f}) -> Z = {z:.4f}{mark}\n"
+                    txt_content += f"x=({v[0]:.2f}, {v[1]:.2f}) -> Z={z:.4f}{mark}\n"
+                
                 v_opt = res['otimos'][0]
-                relatorio_txt += f"\n3. SOLUÇÃO ÓTIMA:\nx* = ({v_opt[0]:.4f}, {v_opt[1]:.4f})\nZ* = {res['z_opt']:.4f}\n"
+                txt_content += f"\n3. SOLUCAO OTIMA:\nx* = ({v_opt[0]:.4f}, {v_opt[1]:.4f})\nZ* = {res['z_opt']:.4f}"
 
                 img_buf = io.BytesIO()
                 fig.savefig(img_buf, format='png', bbox_inches='tight')
-                img_buf.seek(0)
                 
-                zip_buf = io.BytesIO()
-                with zipfile.ZipFile(zip_buf, "w") as zf:
-                    zf.writestr(txt_filename, relatorio_txt)
-                    zf.writestr(img_filename, img_buf.getvalue())
-                zip_buf.seek(0)
+                z_buf = io.BytesIO()
+                with zipfile.ZipFile(z_buf, "w") as zf:
+                    zf.writestr(f"Relatorio_{nome_base}.txt", txt_content)
+                    zf.writestr(f"Grafico_{nome_base}.png", img_buf.getvalue())
+                z_buf.seek(0)
                 
-                st.download_button(label=f"📦 Baixar Resultados ({zip_filename})", data=zip_buf, file_name=zip_filename, mime="application/zip")
+                st.download_button(f"📦 Baixar ({zip_name})", data=z_buf, file_name=zip_name, mime="application/zip")
 
-    except ValueError as ve:
-        st.error(f"❌ **Erro de Sintaxe:** {str(ve)}")
-        st.info("Verifique o Guia de Sintaxe na barra lateral para corrigir seu modelo.")
-    except Exception as e:
-        st.error(f"❌ **Erro Inesperado:** {str(e)}")
+    except Exception as e: st.error(f"Erro: {str(e)}")
 else:
-    if not texto_input: st.info("👈 Selecione um exercício ou insira um modelo personalizado para começar.")
+    if not texto_input: st.info("👈 Selecione um exercício.")
