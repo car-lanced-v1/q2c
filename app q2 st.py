@@ -27,7 +27,7 @@ plt.rcParams.update({
 })
 
 # =============================================================================
-# 1. PARSER (MANTIDO)
+# 1. PARSER
 # =============================================================================
 def ler_problema_texto(texto_entrada):
     texto_entrada = re.sub(r'(?i)(Sujeito a\s*[:]?)\s*', r'\1\n', texto_entrada)
@@ -104,7 +104,7 @@ def ler_problema_texto(texto_entrada):
     return np.array(c), np.array(A_final), np.array(b), sinais, tipo_opt
 
 # =============================================================================
-# 2. CÁLCULO (MANTIDO)
+# 2. CÁLCULO
 # =============================================================================
 def verificar_limitacao_region(A, sinais):
     normais = []
@@ -167,18 +167,39 @@ def resolver_sistema_grafico(c, A, b, sinais, tipo):
     }
 
 # =============================================================================
-# 3. VISUALIZAÇÃO
+# 3. VISUALIZAÇÃO (CORRIGIDA)
 # =============================================================================
 def gerar_texto_latex(c, A, b, sinais, tipo):
     sinal_z = "Min" if tipo == 'min' else "Max"
-    termos = [f"{'+' if v>=0 else '-'} {abs(v):.2f}x_{{{i+1}}}" for i, v in enumerate(c) if abs(v)>1e-9]
+    
+    # Monta Função Objetivo
+    termos = []
+    for i, v in enumerate(c):
+        if abs(v) > 1e-9:
+            s = f"+ {abs(v):.2f}" if v >= 0 else f"- {abs(v):.2f}"
+            termos.append(f"{s}x_{{{i+1}}}")
     z_eq = " ".join(termos).strip().lstrip("+")
-    latex = f"\\text{{{sinal_z}}} \\ Z = {z_eq} \\\\ \\text{Sujeito a:} \\\\ \\begin{{cases}} "
+    
+    # Construção segura do LaTeX (sem f-strings complexas)
+    latex = f"\\text{{{sinal_z}}} \\ Z = {z_eq}"
+    latex += " \\\\ \\text{Sujeito a:} \\\\ \\begin{cases} "
+    
+    # Monta Restrições
     for i, (row, val) in enumerate(zip(A, b)):
-        lhs = " ".join([f"{'+' if k>=0 else '-'} {abs(k):.2f}x_{{{j+1}}}" for j, k in enumerate(row) if abs(k)>1e-9]).strip().lstrip("+")
+        row_terms = []
+        for j, k in enumerate(row):
+            if abs(k) > 1e-9:
+                s = f"+ {abs(k):.2f}" if k >= 0 else f"- {abs(k):.2f}"
+                row_terms.append(f"{s}x_{{{j+1}}}")
+        
+        lhs = " ".join(row_terms).strip().lstrip("+")
+        if not lhs: lhs = "0"
+        
         op = "\\le" if sinais[i] == '<=' else "\\ge" if sinais[i] == '>=' else "="
-        latex += f"{lhs} {op} {val} \\\\"
-    return latex + "x_1, x_2 \\ge 0 \\end{cases}"
+        latex += f"{lhs} {op} {val} \\\\ "
+        
+    latex += "x_1, x_2 \\ge 0 \\end{cases}"
+    return latex
 
 def gerar_grafico(res, A, b, titulo):
     vertices, otimos = res["vertices"], res["otimos"]
@@ -251,37 +272,23 @@ if btn_resolver and texto_input:
                     fig = gerar_grafico(res, A, b, sel_ex if sel_ex != "Personalizado" else "Solução Gráfica")
                     st.pyplot(fig)
                 
-                # --- LÓGICA DE DOWNLOAD PERSONALIZADO ---
+                # Download Personalizado
                 st.markdown("---")
                 
-                # 1. Definir Nomes de Arquivos com base na seleção
                 nome_base = "Modelo_Personalizado"
                 match = re.search(r'Ex (\d+)', sel_ex)
-                if match:
-                    num = match.group(1)
-                    nome_base = f"Questao_{num}"
+                if match: nome_base = f"Questao_{match.group(1)}"
                 
                 zip_filename = f"{nome_base}.zip"
                 txt_filename = f"Relatorio_{nome_base}.txt"
                 img_filename = f"Grafico_{nome_base}.png"
 
-                # 2. Gerar Conteúdo do Relatório em Texto
-                relatorio_txt = f"RELATÓRIO DE SOLUÇÃO - {sel_ex}\n"
-                relatorio_txt += "="*50 + "\n\n"
-                relatorio_txt += "1. DEFINIÇÃO DO PROBLEMA\n"
-                relatorio_txt += texto_input + "\n\n"
-                relatorio_txt += "2. VÉRTICES ENCONTRADOS\n"
-                relatorio_txt += f"{'x1':<10} | {'x2':<10} | {'Valor Z':<15}\n"
-                relatorio_txt += "-"*40 + "\n"
+                relatorio_txt = f"RELATÓRIO DE SOLUÇÃO - {sel_ex}\n{'='*50}\n\n1. MODELO:\n{texto_input}\n\n2. VÉRTICES:\n"
                 for v, z in zip(res['vertices'], res['z_vals']):
-                    mark = " (*)" if np.abs(z - res['z_opt']) < 1e-7 else ""
-                    relatorio_txt += f"{v[0]:<10.2f} | {v[1]:<10.2f} | {z:<15.4f}{mark}\n"
-                relatorio_txt += "\n3. SOLUÇÃO ÓTIMA\n"
+                    relatorio_txt += f"x=({v[0]:.2f}, {v[1]:.2f}) -> Z={z:.4f}\n"
                 v_opt = res['otimos'][0]
-                relatorio_txt += f"x* = ({v_opt[0]:.4f}, {v_opt[1]:.4f})\n"
-                relatorio_txt += f"Z* = {res['z_opt']:.4f}\n"
+                relatorio_txt += f"\n3. ÓTIMO:\nx* = ({v_opt[0]:.4f}, {v_opt[1]:.4f})\nZ* = {res['z_opt']:.4f}\n"
 
-                # 3. Preparar Buffers
                 img_buf = io.BytesIO()
                 fig.savefig(img_buf, format='png', bbox_inches='tight')
                 img_buf.seek(0)
@@ -292,12 +299,7 @@ if btn_resolver and texto_input:
                     zf.writestr(img_filename, img_buf.getvalue())
                 zip_buf.seek(0)
                 
-                st.download_button(
-                    label=f"📦 Baixar Resultados ({zip_filename})",
-                    data=zip_buf,
-                    file_name=zip_filename,
-                    mime="application/zip"
-                )
+                st.download_button(label=f"📦 Baixar Resultados ({zip_filename})", data=zip_buf, file_name=zip_filename, mime="application/zip")
 
     except Exception as e: st.error(f"Erro: {str(e)}")
 else:
